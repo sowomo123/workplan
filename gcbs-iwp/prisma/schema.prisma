@@ -1,0 +1,221 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  workosId    String   @unique
+  email       String   @unique
+  firstName   String
+  lastName    String
+  role        UserRole
+  department  String?
+  college     String?
+  supervisorId String? @db.ObjectId
+  supervisor   User?   @relation("SupervisorStaff", fields: [supervisorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  staff        User[]  @relation("SupervisorStaff")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  iwps              IWP[]
+  reviews           Review[]
+  iwpActivities     IWPActivity[]
+  createdTemplates  IWPTemplate[]
+  createdCriteria   IWPCriteria[]
+  uploadedEvidence  ActivityEvidence[]
+}
+
+// Templates that define the structure for IWPs
+model IWPTemplate {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  description String
+  category    String        // e.g., "Academic Staff", "Technical Staff", "Administrative Staff"
+  isActive    Boolean       @default(true)
+  createdBy   String        @db.ObjectId
+  creator     User          @relation(fields: [createdBy], references: [id])
+
+  // Template contains multiple criteria for evaluation
+  criteria    IWPCriteria[]
+
+  // IWPs created from this template
+  iwps        IWP[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Criteria that make up a template - these define what gets evaluated
+model IWPCriteria {
+  id              String @id @default(auto()) @map("_id") @db.ObjectId
+  title           String
+  description     String
+  weight          Float           // Percentage weight in overall evaluation
+  maxScore        Float           @default(5.0)
+
+  // Belongs to a template
+  templateId      String          @db.ObjectId
+  template        IWPTemplate     @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  createdBy       String          @db.ObjectId
+  creator         User            @relation(fields: [createdBy], references: [id])
+
+  // Activities are evaluated against this criteria
+  evaluations     ActivityEvaluation[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// User's actual IWP instance created from a template
+model IWP {
+  id              String @id @default(auto()) @map("_id") @db.ObjectId
+  title           String
+  academicYear    String
+  status          IWPStatus
+
+  // References the template this IWP was created from
+  templateId      String          @db.ObjectId
+  template        IWPTemplate     @relation(fields: [templateId], references: [id])
+
+  // Belongs to a user
+  userId          String          @db.ObjectId
+  user            User            @relation(fields: [userId], references: [id])
+
+  // Contains user's activities
+  activities      IWPActivity[]
+
+  // Review and documents
+  reviews         Review[]
+  documents       Document[]
+
+  submittedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// User's activities within their IWP (what they actually did/plan to do)
+model IWPActivity {
+  id              String @id @default(auto()) @map("_id") @db.ObjectId
+  title           String
+  description     String
+  targetOutcome   String
+  actualOutcome   String?
+
+  // Belongs to an IWP
+  iwpId           String          @db.ObjectId
+  iwp             IWP             @relation(fields: [iwpId], references: [id], onDelete: Cascade)
+
+  // Created by user
+  createdBy       String          @db.ObjectId
+  creator         User            @relation(fields: [createdBy], references: [id])
+
+  // Activities get evaluated against multiple criteria
+  evaluations     ActivityEvaluation[]
+
+  // Evidence files for this activity
+  evidenceFiles   ActivityEvidence[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Junction table: How activities are evaluated against criteria
+model ActivityEvaluation {
+  id              String @id @default(auto()) @map("_id") @db.ObjectId
+
+  // The activity being evaluated
+  activityId      String          @db.ObjectId
+  activity        IWPActivity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  // The criteria it's being evaluated against
+  criteriaId      String          @db.ObjectId
+  criteria        IWPCriteria     @relation(fields: [criteriaId], references: [id], onDelete: Cascade)
+
+  // Evaluation scores and feedback
+  selfScore       Float?          // User's self-assessment
+  supervisorScore Float?          // Supervisor's score
+  supervisorFeedback String?      // Supervisor's comments
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([activityId, criteriaId])
+}
+
+// Review system models
+model Review {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  iwpId       String @db.ObjectId
+  reviewerId  String @db.ObjectId
+  iwp         IWP    @relation(fields: [iwpId], references: [id])
+  reviewer    User   @relation(fields: [reviewerId], references: [id])
+  overallRating Float?
+  status      ReviewStatus
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Document {
+  id        String @id @default(auto()) @map("_id") @db.ObjectId
+  filename  String
+  fileUrl   String
+  fileType  String
+  fileSize  Int
+  uploadedBy String @db.ObjectId
+  iwpId     String @db.ObjectId
+  iwp       IWP    @relation(fields: [iwpId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// Evidence files uploaded for specific activities
+model ActivityEvidence {
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  filename    String
+  fileUrl     String
+  fileType    String
+  fileSize    Int
+  description String?        // Optional description of what this evidence shows
+
+  // Belongs to an activity
+  activityId  String          @db.ObjectId
+  activity    IWPActivity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  // Uploaded by user
+  uploadedBy  String          @db.ObjectId
+  uploader    User            @relation(fields: [uploadedBy], references: [id])
+
+  createdAt   DateTime @default(now())
+}
+
+enum UserRole {
+  LECTURER
+  SUPERVISOR
+  ADMINISTRATOR
+}
+
+enum IWPStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  COMPLETED
+}
+
+enum ReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
